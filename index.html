@@ -2,345 +2,321 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>汉字武斗场 Demo</title>
+<title>汉字武斗场 - 即时制Demo</title>
 <style>
   body {
     background: #111;
     color: #eee;
     font-family: 'SimHei', monospace;
-    user-select: none;
     margin: 0; padding: 0;
+    user-select: none;
     display: flex; flex-direction: column; align-items: center;
+    height: 100vh;
   }
-  #game {
-    margin-top: 10px;
-    white-space: pre;
-    font-size: 28px;
-    line-height: 1;
+  #gameArea {
+    position: relative;
     width: 600px;
     height: 320px;
     background: #222;
     border: 2px solid #555;
-    padding: 12px;
-    position: relative;
+    margin-top: 10px;
+    overflow: hidden;
+    font-size: 40px;
+    line-height: 1;
   }
-  /* 角色颜色 */
-  .player { color: #ff5555; text-shadow: 0 0 8px red; }
-  .enemy { color: #aa00aa; }
-  .boss { font-size: 40px; animation: glow 1s infinite alternate; user-select:none;}
-  @keyframes glow {
-    from {opacity: 1;}
-    to {opacity: 0.6;}
+  .entity {
+    position: absolute;
+    user-select: none;
+    transition: left 0.2s, top 0.2s;
+    font-weight: bold;
   }
-  /* 状态栏 */
-  #status {
+  .player {
+    color: #ff5555;
+    text-shadow: 0 0 8px red;
+  }
+  .boss {
+    color: #aa00aa;
+    text-shadow: 0 0 12px purple;
+  }
+  #statusBar {
     margin-top: 10px;
     width: 600px;
     background: #222;
     border: 2px solid #555;
     padding: 8px 12px;
-    font-size: 16px;
+    font-size: 18px;
     display: flex; justify-content: space-between;
   }
-  #status > div {
-    min-width: 120px;
+  #skillInputContainer {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    padding: 12px;
+    border-radius: 8px;
+    display: none;
   }
-  .hp, .energy {
-    font-weight: bold;
+  #skillInput {
+    font-size: 24px;
+    padding: 6px 10px;
+    width: 300px;
+    border: none;
+    outline: none;
+    border-radius: 4px;
   }
-  .combo-list {
-    max-height: 100px;
-    overflow-y: auto;
-    border-top: 1px solid #555;
-    margin-top: 8px;
-    padding-top: 4px;
-    font-size: 14px;
-  }
-  .equipment {
-    margin-top: 8px;
-    font-size: 14px;
-    color: #6cf;
-  }
-  /* 连招输入提示 */
-  #inputBuffer {
-    margin-top: 8px;
-    font-size: 20px;
-    color: #ffa;
-    min-height: 30px;
-  }
-  /* 按键提示 */
-  #hint {
-    margin-top: 4px;
-    font-size: 14px;
+  #skillInput::placeholder {
     color: #888;
+  }
+  #message {
+    margin-top: 8px;
+    height: 24px;
+    color: #ffa;
+    font-weight: bold;
   }
 </style>
 </head>
 <body>
 
-<h1>汉字武斗场 Demo</h1>
-<div id="game" aria-label="游戏主界面"></div>
+<h1>汉字武斗场 - 即时制Demo</h1>
 
-<div id="status">
-  <div>
-    <div>玩家: <span id="playerChar" class="player"></span></div>
-    <div>生命值: <span id="playerHp" class="hp"></span></div>
-    <div>能量值: <span id="playerEnergy" class="energy"></span></div>
-  </div>
-  <div>
-    <div>BOSS: <span id="bossChar" class="boss"></span></div>
-    <div>生命值: <span id="bossHp" class="hp"></span></div>
-    <div>状态: <span id="bossState"></span></div>
-  </div>
+<div id="gameArea" aria-label="游戏战斗区域">
+  <div id="player" class="entity player" style="left: 50px; top: 130px;">武</div>
+  <div id="boss" class="entity boss" style="left: 500px; top: 130px;">剑</div>
 </div>
 
-<div>
-  <strong>当前连招列表 (按方向键/击气输入):</strong>
-  <div class="combo-list" id="comboList"></div>
-  <div class="equipment" id="equipmentList">装备: 无</div>
-  <div id="inputBuffer"></div>
-  <div id="hint">操作提示：用键盘输入“击”、“气”、“↑”、“↓”、“←”、“→”组成连招</div>
+<div id="statusBar">
+  <div>玩家 血量: <span id="playerHp">5</span> 能量: <span id="playerEnergy">3</span></div>
+  <div>BOSS 血量: <span id="bossHp">12</span></div>
 </div>
+
+<div id="skillInputContainer">
+  <input type="text" id="skillInput" placeholder="请输入拼音连招，如 jiji, qiqi..." autocomplete="off" />
+</div>
+
+<div id="message" aria-live="polite"></div>
 
 <script>
-// —— 游戏数据结构定义 ——
+(() => {
+  const gameArea = document.getElementById("gameArea");
+  const playerEl = document.getElementById("player");
+  const bossEl = document.getElementById("boss");
+  const playerHpEl = document.getElementById("playerHp");
+  const playerEnergyEl = document.getElementById("playerEnergy");
+  const bossHpEl = document.getElementById("bossHp");
+  const skillInputContainer = document.getElementById("skillInputContainer");
+  const skillInput = document.getElementById("skillInput");
+  const messageEl = document.getElementById("message");
 
-const player = {
-  char: "武",
-  hp: 5,
-  maxHp: 5,
-  energy: 3,
-  maxEnergy: 3,
-  combos: ["击击击", "击气击", "↓↑气击"],
-  equipment: [],
-  level: 1,
-  exp: 0
-};
+  // 游戏实体数据
+  const player = {
+    x: 50,
+    y: 130,
+    size: 40,
+    hp: 5,
+    maxHp: 5,
+    energy: 3,
+    maxEnergy: 3,
+    speed: 10,
+    combos: {
+      // 拼音连招 : { damage, energyCost, display }
+      "jiji": { damage: 3, energyCost: 0, display: "击击" },
+      "qiqi": { damage: 4, energyCost: 1, display: "气气" },
+      "jiqi": { damage: 5, energyCost: 2, display: "击气" }
+    },
+    equipment: ["剑"]
+  };
 
-const boss = {
-  charStates: ["狂", "枉"],
-  currentStateIndex: 0,
-  hp: 12,
-  maxHp: 12,
-  state: "狂", // 当前状态
-  isDefending: false
-};
+  const boss = {
+    x: 500,
+    y: 130,
+    size: 40,
+    hp: 12,
+    maxHp: 12,
+    speed: 3,
+    isAttacking: false
+  };
 
-const comboSystem = {
-  unlocked: {
-    "击击击": { damage: 3, energy: 0 },
-    "击气击": { damage: 4, energy: 1 },
-    "↓↑气击": { damage: 5, energy: 2 }
-  },
-  discoverable: {
-    "气↓↑击气": { damage: 7, hint: "击败3个敌人后解锁" },
-    "击击↓↑气": { damage: 8, hint: "装备'剑'后解锁" }
+  // 更新实体位置UI
+  function updatePositions(){
+    playerEl.style.left = player.x + "px";
+    playerEl.style.top = player.y + "px";
+    bossEl.style.left = boss.x + "px";
+    bossEl.style.top = boss.y + "px";
   }
-};
 
-// 装备示范（初始空）
-player.equipment = ["剑"]; // 方便演示，预置装备“剑”
-
-// —— DOM元素缓存 ——
-const gameDiv = document.getElementById("game");
-const playerCharSpan = document.getElementById("playerChar");
-const playerHpSpan = document.getElementById("playerHp");
-const playerEnergySpan = document.getElementById("playerEnergy");
-const bossCharSpan = document.getElementById("bossChar");
-const bossHpSpan = document.getElementById("bossHp");
-const bossStateSpan = document.getElementById("bossState");
-const comboListDiv = document.getElementById("comboList");
-const equipmentListDiv = document.getElementById("equipmentList");
-const inputBufferDiv = document.getElementById("inputBuffer");
-
-// —— 输入管理 ——
-const inputBuffer = [];
-const COMBO_TIMEOUT = 1000; // 1秒内输入有效
-let lastInputTime = 0;
-
-const validInputs = new Set(["击", "气", "↑", "↓", "←", "→"]);
-
-function addInput(key) {
-  const now = Date.now();
-  if(now - lastInputTime > COMBO_TIMEOUT){
-    inputBuffer.length = 0; // 超时清空输入缓冲
+  // 更新状态栏
+  function updateStatus(){
+    playerHpEl.textContent = player.hp;
+    playerEnergyEl.textContent = player.energy;
+    bossHpEl.textContent = boss.hp;
   }
-  if(validInputs.has(key)){
-    inputBuffer.push(key);
-    lastInputTime = now;
-    updateInputBufferDisplay();
-    checkCombos();
-  }
-}
 
-function updateInputBufferDisplay(){
-  inputBufferDiv.textContent = "输入缓冲：" + inputBuffer.join("");
-}
-
-// —— 连招判定 ——
-function checkCombos(){
-  const inputStr = inputBuffer.join("");
-  for(const combo in comboSystem.unlocked){
-    if(inputStr.endsWith(combo)){
-      tryPerformCombo(combo);
-      inputBuffer.length = 0; // 清空缓冲
-      updateInputBufferDisplay();
-      break;
+  // 显示提示信息
+  function showMessage(msg, duration=2000){
+    messageEl.textContent = msg;
+    if(duration > 0){
+      clearTimeout(showMessage.timeoutId);
+      showMessage.timeoutId = setTimeout(() => {
+        messageEl.textContent = "";
+      }, duration);
     }
   }
-}
 
-// —— 战斗逻辑 ——
-
-function tryPerformCombo(combo) {
-  const comboData = comboSystem.unlocked[combo];
-  if(!comboData) return;
-  if(player.energy < comboData.energy){
-    showMessage("能量不足，无法释放连招！");
-    return;
-  }
-  player.energy -= comboData.energy;
-
-  // 计算伤害
-  let damage = comboData.damage;
-
-  // 装备加成（示例）
-  if(player.equipment.includes("剑")){
-    damage = Math.floor(damage * 1.2);
+  // 玩家移动限制，边界判定
+  function clampPosition(){
+    player.x = Math.min(Math.max(player.x, 0), gameArea.clientWidth - player.size);
+    player.y = Math.min(Math.max(player.y, 0), gameArea.clientHeight - player.size);
+    boss.x = Math.min(Math.max(boss.x, 0), gameArea.clientWidth - boss.size);
+    boss.y = Math.min(Math.max(boss.y, 0), gameArea.clientHeight - boss.size);
   }
 
-  // 伤害应用到BOSS
-  if(boss.state === "枉" && boss.isDefending){
-    // 反弹伤害，玩家受伤
-    let reflectDamage = Math.floor(damage / 2);
-    player.hp -= reflectDamage;
-    showMessage(`BOSS反弹伤害！你受到 ${reflectDamage} 点伤害`);
-  } else {
+  // 简单碰撞检测
+  function isColliding(a, b){
+    return !(
+      a.x + a.size < b.x ||
+      a.x > b.x + b.size ||
+      a.y + a.size < b.y ||
+      a.y > b.y + b.size
+    );
+  }
+
+  // BOSS追踪玩家（简单向玩家方向移动）
+  function bossAI(){
+    if(boss.isAttacking) return; // 攻击中暂不移动
+
+    if(boss.x < player.x) boss.x += boss.speed;
+    else if(boss.x > player.x) boss.x -= boss.speed;
+
+    if(boss.y < player.y) boss.y += boss.speed;
+    else if(boss.y > player.y) boss.y -= boss.speed;
+
+    clampPosition();
+    updatePositions();
+  }
+
+  // BOSS攻击玩家
+  function bossAttack(){
+    if(isColliding(player, boss)){
+      if(!boss.isAttacking){
+        boss.isAttacking = true;
+        player.hp -= 1;
+        updateStatus();
+        showMessage("BOSS 攻击！你受到 1 点伤害", 1500);
+        if(player.hp <= 0){
+          showMessage("你被击败了！游戏结束", 0);
+          gameOver();
+          return;
+        }
+        setTimeout(() => {
+          boss.isAttacking = false;
+        }, 1000);
+      }
+    }
+  }
+
+  // 游戏结束处理
+  function gameOver(){
+    skillInputContainer.style.display = "none";
+    // 停止所有动作
+    clearInterval(gameLoopInterval);
+    window.removeEventListener("keydown", keydownHandler);
+  }
+
+  // 玩家技能释放
+  function tryUseSkill(pinyin){
+    const skill = player.combos[pinyin.toLowerCase()];
+    if(!skill){
+      showMessage("无效连招！");
+      return false;
+    }
+    if(player.energy < skill.energyCost){
+      showMessage("能量不足！");
+      return false;
+    }
+    player.energy -= skill.energyCost;
+
+    // 计算伤害，装备“剑”加成20%
+    let damage = skill.damage;
+    if(player.equipment.includes("剑")){
+      damage = Math.floor(damage * 1.2);
+    }
     boss.hp -= damage;
-    showMessage(`你对BOSS造成 ${damage} 点伤害`);
+    updateStatus();
+    showMessage(`释放连招"${skill.display}"，对BOSS造成${damage}点伤害！`, 2500);
+
+    if(boss.hp <= 0){
+      showMessage("恭喜你击败了BOSS！", 0);
+      gameOver();
+    }
+    return true;
   }
 
-  // BOSS状态判定
-  updateBossState();
-
-  updateUI();
-  checkEndConditions();
-}
-
-function updateBossState(){
-  // BOSS“狂”和“枉”切换，每4秒切换一次，且切换时可被打双倍伤害
-  const now = Date.now();
-  if(!updateBossState.lastSwitch) updateBossState.lastSwitch = now;
-  if(now - updateBossState.lastSwitch > 4000){
-    updateBossState.lastSwitch = now;
-    boss.currentStateIndex = (boss.currentStateIndex + 1) % boss.charStates.length;
-    boss.state = boss.charStates[boss.currentStateIndex];
-    boss.isDefending = (boss.state === "枉");
-    showMessage(`BOSS状态切换为 "${boss.state}"${boss.isDefending ? "（防御反弹）" : ""}`);
-  }
-}
-
-// —— UI更新 ——
-
-function updateUI(){
-  playerCharSpan.textContent = player.char;
-  playerHpSpan.textContent = "❤".repeat(Math.max(player.hp,0)) + " ".repeat(player.maxHp - player.hp);
-  playerEnergySpan.textContent = "✦".repeat(Math.max(player.energy,0)) + " ".repeat(player.maxEnergy - player.energy);
-  bossCharSpan.textContent = boss.state;
-  bossHpSpan.textContent = "❤".repeat(Math.max(boss.hp,0)) + " ".repeat(boss.maxHp - boss.hp);
-  bossStateSpan.textContent = boss.isDefending ? "防御中" : "攻击中";
-
-  // 连招列表显示
-  comboListDiv.innerHTML = "";
-  for(const c in comboSystem.unlocked){
-    const d = comboSystem.unlocked[c];
-    const div = document.createElement("div");
-    div.textContent = `${c} → 伤害: ${d.damage}, 能量: ${d.energy}`;
-    comboListDiv.appendChild(div);
+  // 玩家移动控制
+  const keysDown = new Set();
+  function movePlayer(){
+    if(keysDown.has("ArrowUp")) player.y -= player.speed;
+    if(keysDown.has("ArrowDown")) player.y += player.speed;
+    if(keysDown.has("ArrowLeft")) player.x -= player.speed;
+    if(keysDown.has("ArrowRight")) player.x += player.speed;
+    clampPosition();
   }
 
-  // 装备显示
-  if(player.equipment.length) {
-    equipmentListDiv.textContent = "装备: " + player.equipment.join(", ");
-  } else {
-    equipmentListDiv.textContent = "装备: 无";
+  // 主循环
+  function gameLoop(){
+    movePlayer();
+    bossAI();
+    bossAttack();
+    updatePositions();
   }
-}
 
-// —— 消息显示 ——
-let messageTimeout = null;
-function showMessage(msg){
-  if(messageTimeout) clearTimeout(messageTimeout);
-  inputBufferDiv.textContent = msg;
-  messageTimeout = setTimeout(updateInputBufferDisplay, 2000);
-}
-
-// —— 持续恢复能量（每秒） ——
-setInterval(() => {
-  if(player.energy < player.maxEnergy){
-    player.energy++;
-    updateUI();
+  // 监听键盘事件
+  function keydownHandler(e){
+    if(skillInputContainer.style.display === "block"){
+      // 技能输入框激活时，拦截除回车外的按键
+      if(e.key === "Enter"){
+        const val = skillInput.value.trim();
+        if(val.length > 0){
+          tryUseSkill(val);
+          skillInput.value = "";
+          skillInputContainer.style.display = "none";
+        } else {
+          skillInputContainer.style.display = "none";
+          showMessage("取消技能输入");
+        }
+        e.preventDefault();
+      }
+      return; // 其他按键忽略
+    }
+    // 非输入框时，监听移动键和E键
+    if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)){
+      keysDown.add(e.key);
+      e.preventDefault();
+    }
+    if(e.key === "e" || e.key === "E"){
+      skillInputContainer.style.display = "block";
+      skillInput.focus();
+      e.preventDefault();
+    }
   }
-}, 1000);
-
-// —— BOSS状态切换定时器 ——
-setInterval(() => {
-  updateBossState();
-  updateUI();
-}, 500);
-
-// —— 胜负判断 ——
-function checkEndConditions(){
-  if(boss.hp <= 0){
-    showMessage("恭喜！击败了BOSS“狂”！");
-    resetBattle();
-  } else if(player.hp <= 0){
-    showMessage("你已阵亡，战斗结束！");
-    resetBattle();
+  function keyupHandler(e){
+    keysDown.delete(e.key);
   }
-}
 
-function resetBattle(){
-  // 重置状态
-  player.hp = player.maxHp;
-  player.energy = player.maxEnergy;
-  boss.hp = boss.maxHp;
-  boss.currentStateIndex = 0;
-  boss.state = boss.charStates[0];
-  boss.isDefending = false;
-  updateUI();
-}
+  window.addEventListener("keydown", keydownHandler);
+  window.addEventListener("keyup", keyupHandler);
 
-// —— 键盘输入映射 ——
+  // 启动游戏循环
+  const FPS = 30;
+  const gameLoopInterval = setInterval(gameLoop, 1000 / FPS);
 
-function mapKeyToAction(key){
-  switch(key){
-    case "j": return "击";
-    case "k": return "气";
-    case "ArrowUp": return "↑";
-    case "ArrowDown": return "↓";
-    case "ArrowLeft": return "←";
-    case "ArrowRight": return "→";
-    default: return null;
-  }
-}
+  // 初始化UI
+  updatePositions();
+  updateStatus();
+  showMessage('按方向键移动，按"E"键打开技能输入框');
 
-window.addEventListener("keydown", e => {
-  const input = mapKeyToAction(e.key);
-  if(input){
-    addInput(input);
-    e.preventDefault();
-  }
-});
-
-// —— 页面加载完成后初始化 ——
-
-window.onload = () => {
-  updateUI();
-  updateInputBufferDisplay();
-  showMessage("游戏准备完毕，输入连招：击/气 + 方向键 (用J/K及方向键代替)");
-};
+})();
 </script>
+
 </body>
 </html>
