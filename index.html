@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<title>汉字武斗场 - 即时制Demo</title>
+<title>汉字武斗场 - 汉字输入版Demo</title>
 <style>
   body {
     background: #111;
@@ -38,6 +38,14 @@
     color: #aa00aa;
     text-shadow: 0 0 12px purple;
   }
+  .weapon {
+    position: absolute;
+    font-size: 28px;
+    color: #66ccff;
+    text-shadow: 0 0 8px #66ccff;
+    user-select: none;
+    pointer-events: none;
+  }
   #statusBar {
     margin-top: 10px;
     width: 600px;
@@ -58,7 +66,7 @@
     display: none;
   }
   #skillInput {
-    font-size: 24px;
+    font-size: 28px;
     padding: 6px 10px;
     width: 300px;
     border: none;
@@ -70,7 +78,7 @@
   }
   #message {
     margin-top: 8px;
-    height: 24px;
+    height: 28px;
     color: #ffa;
     font-weight: bold;
   }
@@ -78,11 +86,13 @@
 </head>
 <body>
 
-<h1>汉字武斗场 - 即时制Demo</h1>
+<h1>汉字武斗场 - 汉字输入版Demo</h1>
 
 <div id="gameArea" aria-label="游戏战斗区域">
   <div id="player" class="entity player" style="left: 50px; top: 130px;">武</div>
-  <div id="boss" class="entity boss" style="left: 500px; top: 130px;">剑</div>
+  <div id="playerWeapon" class="weapon" style="left: 85px; top: 145px;">剑</div>
+  <div id="boss" class="entity boss" style="left: 500px; top: 130px;">狂</div>
+  <div id="bossWeapon" class="weapon" style="left: 465px; top: 145px;">剑</div>
 </div>
 
 <div id="statusBar">
@@ -91,7 +101,7 @@
 </div>
 
 <div id="skillInputContainer">
-  <input type="text" id="skillInput" placeholder="请输入拼音连招，如 jiji, qiqi..." autocomplete="off" />
+  <input type="text" id="skillInput" placeholder="请输入汉字连招，如：击击击、气气" autocomplete="off" />
 </div>
 
 <div id="message" aria-live="polite"></div>
@@ -101,9 +111,13 @@
   const gameArea = document.getElementById("gameArea");
   const playerEl = document.getElementById("player");
   const bossEl = document.getElementById("boss");
+  const playerWeaponEl = document.getElementById("playerWeapon");
+  const bossWeaponEl = document.getElementById("bossWeapon");
+
   const playerHpEl = document.getElementById("playerHp");
   const playerEnergyEl = document.getElementById("playerEnergy");
   const bossHpEl = document.getElementById("bossHp");
+
   const skillInputContainer = document.getElementById("skillInputContainer");
   const skillInput = document.getElementById("skillInput");
   const messageEl = document.getElementById("message");
@@ -119,10 +133,9 @@
     maxEnergy: 3,
     speed: 10,
     combos: {
-      // 拼音连招 : { damage, energyCost, display }
-      "jiji": { damage: 3, energyCost: 0, display: "击击" },
-      "qiqi": { damage: 4, energyCost: 1, display: "气气" },
-      "jiqi": { damage: 5, energyCost: 2, display: "击气" }
+      "击击击": { damage: 3, energyCost: 0 },
+      "气气": { damage: 4, energyCost: 1 },
+      "击气击": { damage: 5, energyCost: 2 }
     },
     equipment: ["剑"]
   };
@@ -141,8 +154,15 @@
   function updatePositions(){
     playerEl.style.left = player.x + "px";
     playerEl.style.top = player.y + "px";
+    // 武器在玩家右下方偏移
+    playerWeaponEl.style.left = (player.x + 35) + "px";
+    playerWeaponEl.style.top = (player.y + 15) + "px";
+
     bossEl.style.left = boss.x + "px";
     bossEl.style.top = boss.y + "px";
+    // 武器在boss左下方偏移
+    bossWeaponEl.style.left = (boss.x - 35) + "px";
+    bossWeaponEl.style.top = (boss.y + 15) + "px";
   }
 
   // 更新状态栏
@@ -218,14 +238,14 @@
   // 游戏结束处理
   function gameOver(){
     skillInputContainer.style.display = "none";
-    // 停止所有动作
     clearInterval(gameLoopInterval);
     window.removeEventListener("keydown", keydownHandler);
+    window.removeEventListener("keyup", keyupHandler);
   }
 
-  // 玩家技能释放
-  function tryUseSkill(pinyin){
-    const skill = player.combos[pinyin.toLowerCase()];
+  // 玩家技能释放，输入的是汉字连招字符串
+  function tryUseSkill(inputStr){
+    const skill = player.combos[inputStr];
     if(!skill){
       showMessage("无效连招！");
       return false;
@@ -243,7 +263,7 @@
     }
     boss.hp -= damage;
     updateStatus();
-    showMessage(`释放连招"${skill.display}"，对BOSS造成${damage}点伤害！`, 2500);
+    showMessage(`释放连招"${inputStr}"，对BOSS造成${damage}点伤害！`, 2500);
 
     if(boss.hp <= 0){
       showMessage("恭喜你击败了BOSS！", 0);
@@ -254,7 +274,9 @@
 
   // 玩家移动控制
   const keysDown = new Set();
+  let canMove = true;
   function movePlayer(){
+    if(!canMove) return;
     if(keysDown.has("ArrowUp")) player.y -= player.speed;
     if(keysDown.has("ArrowDown")) player.y += player.speed;
     if(keysDown.has("ArrowLeft")) player.x -= player.speed;
@@ -280,8 +302,10 @@
           tryUseSkill(val);
           skillInput.value = "";
           skillInputContainer.style.display = "none";
+          canMove = true;
         } else {
           skillInputContainer.style.display = "none";
+          canMove = true;
           showMessage("取消技能输入");
         }
         e.preventDefault();
@@ -290,12 +314,13 @@
     }
     // 非输入框时，监听移动键和E键
     if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)){
-      keysDown.add(e.key);
+      if(canMove) keysDown.add(e.key);
       e.preventDefault();
     }
-    if(e.key === "e" || e.key === "E"){
+    if((e.key === "e" || e.key === "E") && !skillInputContainer.style.display.includes("block")){
       skillInputContainer.style.display = "block";
       skillInput.focus();
+      canMove = false; // 禁止走位
       e.preventDefault();
     }
   }
@@ -313,8 +338,7 @@
   // 初始化UI
   updatePositions();
   updateStatus();
-  showMessage('按方向键移动，按"E"键打开技能输入框');
-
+  showMessage('按方向键移动，按"E"键打开技能输入框，输入汉字连招');
 })();
 </script>
 
