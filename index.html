@@ -2,378 +2,345 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<title>文字平台跳跃 - 无限生存模式</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>汉字武斗场 Demo</title>
 <style>
-  html, body {
-    margin:0; padding:0; height:100%; background:#061025; color:#fff; font-family: monospace;
+  body {
+    background: #111;
+    color: #eee;
+    font-family: 'SimHei', monospace;
+    user-select: none;
+    margin: 0; padding: 0;
+    display: flex; flex-direction: column; align-items: center;
   }
-  #container {
-    display:flex; justify-content:center; align-items:center; height:100vh;
-    user-select:none;
+  #game {
+    margin-top: 10px;
+    white-space: pre;
+    font-size: 28px;
+    line-height: 1;
+    width: 600px;
+    height: 320px;
+    background: #222;
+    border: 2px solid #555;
+    padding: 12px;
+    position: relative;
   }
-  canvas {
-    background: linear-gradient(180deg,#041220,#071821);
-    border-radius:8px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+  /* 角色颜色 */
+  .player { color: #ff5555; text-shadow: 0 0 8px red; }
+  .enemy { color: #aa00aa; }
+  .boss { font-size: 40px; animation: glow 1s infinite alternate; user-select:none;}
+  @keyframes glow {
+    from {opacity: 1;}
+    to {opacity: 0.6;}
   }
-  #ui {
-    position: fixed; top: 20px; right: 20px; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;
-    width: 220px;
+  /* 状态栏 */
+  #status {
+    margin-top: 10px;
+    width: 600px;
+    background: #222;
+    border: 2px solid #555;
+    padding: 8px 12px;
+    font-size: 16px;
+    display: flex; justify-content: space-between;
   }
-  #ui button {
-    margin-top: 10px; width: 100%; padding: 8px; border:none; border-radius: 6px; background:#1f6feb; color:#fff; font-size: 16px; cursor:pointer;
+  #status > div {
+    min-width: 120px;
+  }
+  .hp, .energy {
+    font-weight: bold;
+  }
+  .combo-list {
+    max-height: 100px;
+    overflow-y: auto;
+    border-top: 1px solid #555;
+    margin-top: 8px;
+    padding-top: 4px;
+    font-size: 14px;
+  }
+  .equipment {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #6cf;
+  }
+  /* 连招输入提示 */
+  #inputBuffer {
+    margin-top: 8px;
+    font-size: 20px;
+    color: #ffa;
+    min-height: 30px;
+  }
+  /* 按键提示 */
+  #hint {
+    margin-top: 4px;
+    font-size: 14px;
+    color: #888;
   }
 </style>
 </head>
 <body>
-<div id="container">
-  <canvas id="game" width="960" height="480"></canvas>
+
+<h1>汉字武斗场 Demo</h1>
+<div id="game" aria-label="游戏主界面"></div>
+
+<div id="status">
+  <div>
+    <div>玩家: <span id="playerChar" class="player"></span></div>
+    <div>生命值: <span id="playerHp" class="hp"></span></div>
+    <div>能量值: <span id="playerEnergy" class="energy"></span></div>
+  </div>
+  <div>
+    <div>BOSS: <span id="bossChar" class="boss"></span></div>
+    <div>生命值: <span id="bossHp" class="hp"></span></div>
+    <div>状态: <span id="bossState"></span></div>
+  </div>
 </div>
-<div id="ui">
-  <div>模式：<b>无限生存模式</b></div>
-  <div>得分: <span id="score">0</span></div>
-  <div>死亡: <span id="deaths">0</span></div>
-  <button id="restart">重开（保留统计）</button>
+
+<div>
+  <strong>当前连招列表 (按方向键/击气输入):</strong>
+  <div class="combo-list" id="comboList"></div>
+  <div class="equipment" id="equipmentList">装备: 无</div>
+  <div id="inputBuffer"></div>
+  <div id="hint">操作提示：用键盘输入“击”、“气”、“↑”、“↓”、“←”、“→”组成连招</div>
 </div>
+
 <script>
-(() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  const scoreEl = document.getElementById('score');
-  const deathsEl = document.getElementById('deaths');
-  const restartBtn = document.getElementById('restart');
+// —— 游戏数据结构定义 ——
 
-  const TILE = 36;
-  const ROWS = Math.floor(canvas.height / TILE);
-  const COLS_VISIBLE = Math.ceil(canvas.width / TILE) + 2;
+const player = {
+  char: "武",
+  hp: 5,
+  maxHp: 5,
+  energy: 3,
+  maxEnergy: 3,
+  combos: ["击击击", "击气击", "↓↑气击"],
+  equipment: [],
+  level: 1,
+  exp: 0
+};
 
-  let mapCols = [];
-  let score = 0;
-  let deaths = 0;
-  let speedMultiplier = 1;
+const boss = {
+  charStates: ["狂", "枉"],
+  currentStateIndex: 0,
+  hp: 12,
+  maxHp: 12,
+  state: "狂", // 当前状态
+  isDefending: false
+};
 
-  const player = {
-    x: canvas.width * 0.25,
-    y: 0,
-    w: TILE * 0.6,
-    h: TILE * 0.9,
-    vx: 0,
-    vy: 0,
-    speed: 180,
-    jumpPower: 520,
-    onGround: false
-  };
-
-  let keys = {};
-
-  window.addEventListener('keydown', e => {
-    keys[e.key.toLowerCase()] = true;
-  });
-  window.addEventListener('keyup', e => {
-    keys[e.key.toLowerCase()] = false;
-  });
-
-  function emptyCol() {
-    return new Array(ROWS).fill(' ');
+const comboSystem = {
+  unlocked: {
+    "击击击": { damage: 3, energy: 0 },
+    "击气击": { damage: 4, energy: 1 },
+    "↓↑气击": { damage: 5, energy: 2 }
+  },
+  discoverable: {
+    "气↓↑击气": { damage: 7, hint: "击败3个敌人后解锁" },
+    "击击↓↑气": { damage: 8, hint: "装备'剑'后解锁" }
   }
+};
 
-  function tileAt(col, row) {
-    if (col < 0 || row < 0 || row >= ROWS) return ' ';
-    const c = mapCols[col];
-    if (!c) return ' ';
-    return c[row] || ' ';
+// 装备示范（初始空）
+player.equipment = ["剑"]; // 方便演示，预置装备“剑”
+
+// —— DOM元素缓存 ——
+const gameDiv = document.getElementById("game");
+const playerCharSpan = document.getElementById("playerChar");
+const playerHpSpan = document.getElementById("playerHp");
+const playerEnergySpan = document.getElementById("playerEnergy");
+const bossCharSpan = document.getElementById("bossChar");
+const bossHpSpan = document.getElementById("bossHp");
+const bossStateSpan = document.getElementById("bossState");
+const comboListDiv = document.getElementById("comboList");
+const equipmentListDiv = document.getElementById("equipmentList");
+const inputBufferDiv = document.getElementById("inputBuffer");
+
+// —— 输入管理 ——
+const inputBuffer = [];
+const COMBO_TIMEOUT = 1000; // 1秒内输入有效
+let lastInputTime = 0;
+
+const validInputs = new Set(["击", "气", "↑", "↓", "←", "→"]);
+
+function addInput(key) {
+  const now = Date.now();
+  if(now - lastInputTime > COMBO_TIMEOUT){
+    inputBuffer.length = 0; // 超时清空输入缓冲
   }
-
-  function setTile(col, row, ch) {
-    if (col < 0 || row < 0 || row >= ROWS) return;
-    if (!mapCols[col]) mapCols[col] = emptyCol();
-    mapCols[col][row] = ch;
+  if(validInputs.has(key)){
+    inputBuffer.push(key);
+    lastInputTime = now;
+    updateInputBufferDisplay();
+    checkCombos();
   }
+}
 
-  function generateColumn() {
-    if (!generateColumn.state) generateColumn.state = { runLeft: 0, height: ROWS - 4 };
-    const s = generateColumn.state;
-    const col = emptyCol();
+function updateInputBufferDisplay(){
+  inputBufferDiv.textContent = "输入缓冲：" + inputBuffer.join("");
+}
 
-    if (s.runLeft > 0) {
-      for (let r = s.height; r < ROWS; r++) col[r] = '墙';
-      s.runLeft -= 1;
-    } else {
-      if (Math.random() < 0.6) {
-        s.runLeft = Math.floor(Math.random() * 4) + 2;
-        const dh = Math.floor((Math.random() - 0.5) * 3);
-        s.height = Math.max(ROWS - 10, Math.min(ROWS - 2, s.height + dh));
-        for (let r = s.height; r < ROWS; r++) col[r] = '墙';
-        s.runLeft -= 1;
-      }
-    }
-
-    // decorations
-    for (let r = 0; r < ROWS; r++) {
-      if (col[r] === '墙' && r > 0 && col[r - 1] === ' ') {
-        const p = Math.random();
-        if (p < 0.03) col[r - 1] = '火';
-        else if (p < 0.10) col[r - 1] = '分';
-        else if (p < 0.011) col[r - 1] = '旗';
-      }
-    }
-
-    return col;
-  }
-
-  function initMap() {
-    mapCols = [];
-    const safeStart = 6;
-    for (let i = 0; i < COLS_VISIBLE; i++) {
-      const col = generateColumn();
-      if (i < safeStart) {
-        for (let r = ROWS - 3; r < ROWS; r++) col[r] = '墙';
-      }
-      mapCols.push(col);
+// —— 连招判定 ——
+function checkCombos(){
+  const inputStr = inputBuffer.join("");
+  for(const combo in comboSystem.unlocked){
+    if(inputStr.endsWith(combo)){
+      tryPerformCombo(combo);
+      inputBuffer.length = 0; // 清空缓冲
+      updateInputBufferDisplay();
+      break;
     }
   }
+}
 
-  function respawn() {
-    player.vx = 0;
-    player.vy = 0;
-    player.onGround = false;
-    player.x = canvas.width * 0.25;
-    const col = Math.floor(player.x / TILE);
+// —— 战斗逻辑 ——
 
-    let found = false;
-    for (let r = 0; r < ROWS; r++) {
-      if (tileAt(col, r) === '墙') {
-        player.y = r * TILE - player.h - 0.5;
-        found = true;
-        break;
-      }
-    }
+function tryPerformCombo(combo) {
+  const comboData = comboSystem.unlocked[combo];
+  if(!comboData) return;
+  if(player.energy < comboData.energy){
+    showMessage("能量不足，无法释放连招！");
+    return;
+  }
+  player.energy -= comboData.energy;
 
-    if (!found) {
-      for (let d = 1; d <= 10 && !found; d++) {
-        for (const nc of [col + d, col - d]) {
-          for (let r = 0; r < ROWS; r++) {
-            if (tileAt(nc, r) === '墙') {
-              player.y = r * TILE - player.h - 0.5;
-              found = true;
-              break;
-            }
-          }
-          if (found) break;
-        }
-      }
-    }
+  // 计算伤害
+  let damage = comboData.damage;
 
-    if (!found) {
-      player.y = (ROWS - 4) * TILE - player.h;
-    }
+  // 装备加成（示例）
+  if(player.equipment.includes("剑")){
+    damage = Math.floor(damage * 1.2);
   }
 
-  let spawnAcc = 0;
-  const spawnInterval = 0.45;
-
-  function updateSpawner(dt) {
-    spawnAcc += dt * speedMultiplier;
-    if (spawnAcc >= spawnInterval) {
-      const n = Math.floor(spawnAcc / spawnInterval);
-      for (let i = 0; i < n; i++) {
-        mapCols.shift();
-        mapCols.push(generateColumn());
-        score += 1;
-        speedMultiplier = Math.min(3.5, speedMultiplier + 0.004);
-      }
-      spawnAcc = spawnAcc % spawnInterval;
-      updateUI();
-    }
+  // 伤害应用到BOSS
+  if(boss.state === "枉" && boss.isDefending){
+    // 反弹伤害，玩家受伤
+    let reflectDamage = Math.floor(damage / 2);
+    player.hp -= reflectDamage;
+    showMessage(`BOSS反弹伤害！你受到 ${reflectDamage} 点伤害`);
+  } else {
+    boss.hp -= damage;
+    showMessage(`你对BOSS造成 ${damage} 点伤害`);
   }
 
-  function updateUI() {
-    scoreEl.textContent = score;
-    deathsEl.textContent = deaths;
-  }
+  // BOSS状态判定
+  updateBossState();
 
-  function rectIntersectsTile(px, py, pw, ph, tc, tr) {
-    const tx = tc * TILE, ty = tr * TILE;
-    return !(px + pw <= tx || px >= tx + TILE || py + ph <= ty || py >= ty + TILE);
-  }
-
-  function physicsStep(dt) {
-    const left = keys['arrowleft'] || keys['a'];
-    const right = keys['arrowright'] || keys['d'];
-    const jump = keys[' '] || keys['spacebar'];
-    if (left) player.vx = -player.speed;
-    else if (right) player.vx = player.speed;
-    else player.vx = 0;
-
-    player.vy += 1400 * dt;
-    if (jump && player.onGround) {
-      player.vy = -player.jumpPower;
-      player.onGround = false;
-    }
-
-    let nx = player.x + player.vx * dt;
-    let ny = player.y + player.vy * dt;
-
-    // 横向碰撞
-    const topRow = Math.floor(player.y / TILE);
-    const bottomRow = Math.floor((player.y + player.h - 1) / TILE);
-    if (player.vx !== 0) {
-      const col = player.vx > 0 ? Math.floor((nx + player.w) / TILE) : Math.floor(nx / TILE);
-      for (let row = topRow; row <= bottomRow; row++) {
-        const ch = tileAt(col, row);
-        if (ch !== ' ' && ch !== '分' && ch !== '旗') {
-          if (rectIntersectsTile(nx, player.y, player.w, player.h, col, row)) {
-            if (player.vx > 0) nx = col * TILE - player.w - 0.001;
-            else nx = (col + 1) * TILE + 0.001;
-            player.vx = 0;
-            break;
-          }
-        }
-      }
-    }
-
-    // 纵向碰撞
-    const leftCol = Math.floor(nx / TILE);
-    const rightCol = Math.floor((nx + player.w - 1) / TILE);
-    player.onGround = false;
-    for (let c = leftCol; c <= rightCol; c++) {
-      for (let r = Math.floor(ny / TILE); r <= Math.floor((ny + player.h - 1) / TILE); r++) {
-        const ch = tileAt(c, r);
-        if (ch !== ' ' && ch !== '分' && ch !== '旗') {
-          if (rectIntersectsTile(nx, ny, player.w, player.h, c, r)) {
-            if (player.vy > 0) {
-              ny = r * TILE - player.h - 0.001;
-              player.vy = 0;
-              player.onGround = true;
-            } else if (player.vy < 0) {
-              ny = (r + 1) * TILE + 0.001;
-              player.vy = 0;
-            }
-          }
-        }
-      }
-    }
-
-    player.x = nx;
-    player.y = ny;
-
-    // 中心点所在块检测
-    const centerCol = Math.floor((player.x + player.w / 2) / TILE);
-    const centerRow = Math.floor((player.y + player.h / 2) / TILE);
-    const touched = tileAt(centerCol, centerRow);
-
-    if (touched === '分') {
-      score += 1;
-      setTile(centerCol, centerRow, ' ');
-      updateUI();
-    }
-
-    if (touched === '火') {
-      deaths += 1;
-      score = 0;
-      updateUI();
-      respawn();
-    }
-
-    if (touched === '旗') {
-      score += 10;
-      setTile(centerCol, centerRow, ' ');
-      updateUI();
-    }
-
-    if (player.y > canvas.height + 200) {
-      deaths += 1;
-      score = 0;
-      updateUI();
-      respawn();
-    }
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    ctx.globalAlpha = 0.04;
-    ctx.fillStyle = '#fff';
-    for (let x = 0; x < canvas.width; x += TILE) ctx.fillRect(x, 0, 1, canvas.height);
-    for (let y = 0; y < canvas.height; y += TILE) ctx.fillRect(0, y, canvas.width, 1);
-    ctx.globalAlpha = 1;
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.font = Math.floor(TILE * 0.9) + 'px monospace';
-
-    for (let c = 0; c < mapCols.length; c++) {
-      for (let r = 0; r < ROWS; r++) {
-        const ch = tileAt(c, r);
-        if (ch === ' ') continue;
-        const x = c * TILE;
-        const y = r * TILE;
-        if (ch === '墙') {
-          ctx.fillStyle = '#9fb0ff';
-          ctx.fillText('墙', x + 2, y + 2);
-        } else if (ch === '分') {
-          ctx.fillStyle = '#ffd966';
-          ctx.fillText('分', x + (TILE - ctx.measureText('分').width) / 2, y + 4);
-        } else if (ch === '火') {
-          ctx.fillStyle = '#ff6a6a';
-          ctx.fillText('火', x + 4, y + 4);
-        } else if (ch === '旗') {
-          ctx.fillStyle = '#8af0a0';
-          ctx.fillText('旗', x + 4, y + 4);
-        } else {
-          ctx.fillStyle = '#fff';
-          ctx.fillText(ch, x + 4, y + 2);
-        }
-      }
-    }
-
-    ctx.font = Math.floor(player.h) + 'px monospace';
-    ctx.fillStyle = '#fff';
-    ctx.fillText('你', Math.round(player.x), Math.round(player.y));
-  }
-
-  let lastTimestamp = null;
-  let spawnAccumulator = 0;
-  const spawnInterval = 0.45;
-
-  function gameLoop(ts) {
-    if (!lastTimestamp) lastTimestamp = ts;
-    const dt = Math.min(0.05, (ts - lastTimestamp) / 1000);
-    lastTimestamp = ts;
-
-    spawnAccumulator += dt * speedMultiplier;
-    if (spawnAccumulator >= spawnInterval) {
-      const n = Math.floor(spawnAccumulator / spawnInterval);
-      for (let i = 0; i < n; i++) {
-        mapCols.shift();
-        mapCols.push(generateColumn());
-        score += 1;
-        speedMultiplier = Math.min(3.5, speedMultiplier + 0.004);
-      }
-      spawnAccumulator %= spawnInterval;
-      updateUI();
-    }
-
-    physicsStep(dt);
-    draw();
-
-    requestAnimationFrame(gameLoop);
-  }
-
-  restartBtn.addEventListener('click', () => {
-    score = 0;
-    deaths = 0;
-    speedMultiplier = 1;
-    initMap();
-    respawn();
-    updateUI();
-  });
-
-  initMap();
-  respawn();
   updateUI();
-  requestAnimationFrame(gameLoop);
-})();
+  checkEndConditions();
+}
+
+function updateBossState(){
+  // BOSS“狂”和“枉”切换，每4秒切换一次，且切换时可被打双倍伤害
+  const now = Date.now();
+  if(!updateBossState.lastSwitch) updateBossState.lastSwitch = now;
+  if(now - updateBossState.lastSwitch > 4000){
+    updateBossState.lastSwitch = now;
+    boss.currentStateIndex = (boss.currentStateIndex + 1) % boss.charStates.length;
+    boss.state = boss.charStates[boss.currentStateIndex];
+    boss.isDefending = (boss.state === "枉");
+    showMessage(`BOSS状态切换为 "${boss.state}"${boss.isDefending ? "（防御反弹）" : ""}`);
+  }
+}
+
+// —— UI更新 ——
+
+function updateUI(){
+  playerCharSpan.textContent = player.char;
+  playerHpSpan.textContent = "❤".repeat(Math.max(player.hp,0)) + " ".repeat(player.maxHp - player.hp);
+  playerEnergySpan.textContent = "✦".repeat(Math.max(player.energy,0)) + " ".repeat(player.maxEnergy - player.energy);
+  bossCharSpan.textContent = boss.state;
+  bossHpSpan.textContent = "❤".repeat(Math.max(boss.hp,0)) + " ".repeat(boss.maxHp - boss.hp);
+  bossStateSpan.textContent = boss.isDefending ? "防御中" : "攻击中";
+
+  // 连招列表显示
+  comboListDiv.innerHTML = "";
+  for(const c in comboSystem.unlocked){
+    const d = comboSystem.unlocked[c];
+    const div = document.createElement("div");
+    div.textContent = `${c} → 伤害: ${d.damage}, 能量: ${d.energy}`;
+    comboListDiv.appendChild(div);
+  }
+
+  // 装备显示
+  if(player.equipment.length) {
+    equipmentListDiv.textContent = "装备: " + player.equipment.join(", ");
+  } else {
+    equipmentListDiv.textContent = "装备: 无";
+  }
+}
+
+// —— 消息显示 ——
+let messageTimeout = null;
+function showMessage(msg){
+  if(messageTimeout) clearTimeout(messageTimeout);
+  inputBufferDiv.textContent = msg;
+  messageTimeout = setTimeout(updateInputBufferDisplay, 2000);
+}
+
+// —— 持续恢复能量（每秒） ——
+setInterval(() => {
+  if(player.energy < player.maxEnergy){
+    player.energy++;
+    updateUI();
+  }
+}, 1000);
+
+// —— BOSS状态切换定时器 ——
+setInterval(() => {
+  updateBossState();
+  updateUI();
+}, 500);
+
+// —— 胜负判断 ——
+function checkEndConditions(){
+  if(boss.hp <= 0){
+    showMessage("恭喜！击败了BOSS“狂”！");
+    resetBattle();
+  } else if(player.hp <= 0){
+    showMessage("你已阵亡，战斗结束！");
+    resetBattle();
+  }
+}
+
+function resetBattle(){
+  // 重置状态
+  player.hp = player.maxHp;
+  player.energy = player.maxEnergy;
+  boss.hp = boss.maxHp;
+  boss.currentStateIndex = 0;
+  boss.state = boss.charStates[0];
+  boss.isDefending = false;
+  updateUI();
+}
+
+// —— 键盘输入映射 ——
+
+function mapKeyToAction(key){
+  switch(key){
+    case "j": return "击";
+    case "k": return "气";
+    case "ArrowUp": return "↑";
+    case "ArrowDown": return "↓";
+    case "ArrowLeft": return "←";
+    case "ArrowRight": return "→";
+    default: return null;
+  }
+}
+
+window.addEventListener("keydown", e => {
+  const input = mapKeyToAction(e.key);
+  if(input){
+    addInput(input);
+    e.preventDefault();
+  }
+});
+
+// —— 页面加载完成后初始化 ——
+
+window.onload = () => {
+  updateUI();
+  updateInputBufferDisplay();
+  showMessage("游戏准备完毕，输入连招：击/气 + 方向键 (用J/K及方向键代替)");
+};
 </script>
 </body>
 </html>
