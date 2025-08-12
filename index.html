@@ -1,1 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>文字平台跳跃 - 教程+无限模式</title>
+<style>
+  body { background: #111; color: #fff; font-family: monospace; }
+  canvas { background: #222; display: block; margin: auto; }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="600"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
 
+let tileSize = 40;
+let gravity = 0.6;
+let jumpStrength = -12;
+let player = {x: 80, y: 0, vx: 0, vy: 0, onGround: false};
+let keys = {};
+let score = 0;
+let deaths = 0;
+let mode = 'tutorial';
+let world = [];
+let scrollX = 0;
+let spawnTimer = 0;
+let difficulty = 1;
+
+// 教程关卡（用文字）
+const tutorialMap = [
+  "墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙",
+  "墙                  分               旗墙",
+  "墙    火                               墙",
+  "墙          墙墙墙墙                   墙",
+  "墙                                        墙",
+  "墙                                        墙",
+  "墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙墙"
+];
+
+function initTutorial() {
+  world = tutorialMap.map(row => row.split(''));
+  player.x = tileSize;
+  player.y = canvas.height - tileSize*2;
+  scrollX = 0;
+}
+
+function initInfinite() {
+  world = [];
+  scrollX = 0;
+  spawnTimer = 0;
+  difficulty = 1;
+}
+
+function getTile(x, y) {
+  if (mode === 'tutorial') {
+    let tx = Math.floor(x / tileSize);
+    let ty = Math.floor(y / tileSize);
+    if (ty < 0 || ty >= world.length || tx < 0 || tx >= world[0].length) return ' ';
+    return world[ty][tx];
+  } else {
+    let tx = Math.floor((x + scrollX) / tileSize);
+    let ty = Math.floor(y / tileSize);
+    if (ty < 0 || ty >= 15) return ' ';
+    if (world[ty] && world[ty][tx]) return world[ty][tx];
+    return ' ';
+  }
+}
+
+function setTile(x, y, ch) {
+  if (!world[y]) world[y] = [];
+  world[y][x] = ch;
+}
+
+function update() {
+  // 控制
+  if (keys['ArrowLeft'] || keys['a']) player.vx = -5;
+  else if (keys['ArrowRight'] || keys['d']) player.vx = 5;
+  else player.vx = 0;
+
+  if ((keys['ArrowUp'] || keys[' '] || keys['w']) && player.onGround) {
+    player.vy = jumpStrength;
+    player.onGround = false;
+  }
+
+  player.vy += gravity;
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // 碰撞检测
+  player.onGround = false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      let tile = getTile(player.x + dx * tileSize / 2, player.y + dy * tileSize / 2);
+      if (tile === '墙') {
+        let px = Math.floor((player.x) / tileSize) * tileSize;
+        let py = Math.floor((player.y) / tileSize) * tileSize;
+        if (dy > 0) { player.y = py; player.vy = 0; player.onGround = true; }
+        if (dy < 0) { player.y = py + tileSize; player.vy = 0; }
+        if (dx !== 0) { player.x -= player.vx; player.vx = 0; }
+      }
+      if (tile === '火') {
+        deaths++;
+        if (mode === 'tutorial') initTutorial(); else initInfinite();
+        return;
+      }
+      if (tile === '分') {
+        score++;
+        setTile(Math.floor((player.x + dx * tileSize / 2) / tileSize), Math.floor((player.y + dy * tileSize / 2) / tileSize), ' ');
+      }
+      if (tile === '旗' && mode === 'tutorial') {
+        mode = 'infinite';
+        initInfinite();
+        return;
+      }
+    }
+  }
+
+  // 掉出地图死亡
+  if (player.y > canvas.height) {
+    deaths++;
+    if (mode === 'tutorial') initTutorial(); else initInfinite();
+    return;
+  }
+
+  // 无限模式生成
+  if (mode === 'infinite') {
+    scrollX += 3;
+    spawnTimer -= 3;
+    if (spawnTimer <= 0) {
+      spawnTimer = tileSize;
+      for (let y = 0; y < 15; y++) {
+        if (Math.random() < 0.1 * difficulty) setTile(Math.floor((scrollX + canvas.width) / tileSize), y, '墙');
+        if (Math.random() < 0.02 * difficulty) setTile(Math.floor((scrollX + canvas.width) / tileSize), y, '火');
+        if (Math.random() < 0.02) setTile(Math.floor((scrollX + canvas.width) / tileSize), y, '分');
+      }
+      difficulty += 0.001;
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#fff';
+
+  let offsetX = mode === 'infinite' ? scrollX : 0;
+
+  for (let y = 0; y < world.length; y++) {
+    for (let x = 0; x < world[y].length; x++) {
+      let ch = world[y][x] || ' ';
+      if (ch !== ' ') {
+        ctx.fillText(ch, x * tileSize - offsetX, y * tileSize + tileSize);
+      }
+    }
+  }
+
+  ctx.fillText('你', player.x - offsetX, player.y + tileSize);
+  ctx.fillText(`分数: ${score} 死亡: ${deaths}`, 20, 20);
+  ctx.fillText(mode === 'tutorial' ? '教程: 方向键移动, 空格跳跃, 碰火死, 旗子过关' : '无限模式', 20, 50);
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+initTutorial();
+loop();
+</script>
+</body>
+</html>
